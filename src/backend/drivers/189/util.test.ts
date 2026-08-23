@@ -3,7 +3,7 @@ import { generateKeyPairSync } from "node:crypto"
 import { afterEach, test } from "node:test"
 
 import { Cloud189Driver } from "./driver"
-import { Pan189Client } from "./util"
+import { fetch189WithRetry, Pan189Client } from "./util"
 
 const originalFetch = globalThis.fetch
 
@@ -301,6 +301,83 @@ test("API requests do not wait for refreshed Cookie persistence", async () => {
   assert.equal(state, "resolved")
   assert.deepEqual(await request, { files: [], folders: [] })
   assert.equal(client.consumePendingCookie(), "session=next")
+})
+
+test("189 requests retry transient HTTP failures before succeeding", async () => {
+  let attempts = 0
+  globalThis.fetch = (async (input) => {
+    attempts++
+    if (attempts === 1) {
+      return mockResponse(requestUrl(input), "error code: 522", { status: 522 })
+    }
+    return mockResponse(requestUrl(input), { ok: true }, { status: 200 })
+  }) as typeof fetch
+
+  const response = await fetch189WithRetry(
+    "https://cloud.189.cn/api/test",
+    {},
+    { timeoutMs: 20, maxRetries: 2, retryDelayMs: 0 },
+  )
+
+  assert.equal(response.status, 200)
+  assert.equal(attempts, 2)
+})
+
+test("189 requests retry network interruptions", async () => {
+  let attempts = 0
+  globalThis.fetch = (async (input) => {
+    attempts++
+    if (attempts === 1) throw new Error("socket closed")
+    return mockResponse(requestUrl(input), { ok: true }, { status: 200 })
+  }) as typeof fetch
+
+  const response = await fetch189WithRetry(
+    "https://cloud.189.cn/api/test",
+    {},
+    { timeoutMs: 20, maxRetries: 2, retryDelayMs: 0 },
+  )
+
+  assert.equal(response.status, 200)
+  assert.equal(attempts, 2)
+})
+
+test("189 requests abort after the timeout and exhaust retries", async () => {
+  let attempts = 0
+  globalThis.fetch = (async (_input, init) => {
+    attempts++
+    await new Promise<never>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => {
+        reject(new DOMException("The operation was aborted", "AbortError"))
+      })
+    })
+    throw new Error("unreachable")
+  }) as typeof fetch
+
+  await assert.rejects(
+    () =>
+      fetch189WithRetry(
+        "https://cloud.189.cn/api/test",
+        {},
+        { timeoutMs: 5, maxRetries: 1, retryDelayMs: 0 },
+      ),
+    /请求超时/,
+  )
+  assert.equal(attempts, 2)
+})
+
+test("final 522 responses report an HTTP error instead of malformed JSON", async () => {
+  let attempts = 0
+  globalThis.fetch = (async (input) => {
+    attempts++
+    return mockResponse(requestUrl(input), "error code: 522", { status: 522 })
+  }) as typeof fetch
+
+  const client = new Pan189Client({ username: "", password: "" })
+  await assert.rejects(
+    () => client.request("https://cloud.189.cn/api/test"),
+    /HTTP 请求失败 \(522\).*error code: 522/,
+  )
+  assert.equal(attempts, 3)
 })
 
 test("persistent InvalidSessionKey is reported instead of an empty directory", async () => {

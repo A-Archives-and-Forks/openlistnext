@@ -115,6 +115,72 @@ function isLoggedInUrl(value: string): boolean {
   }
 }
 
+export const CLOUD189_REQUEST_TIMEOUT_MS = 5_000
+export const CLOUD189_MAX_RETRIES = 2
+
+const RETRYABLE_CLOUD189_STATUSES = new Set([502, 503, 504, 522])
+
+export interface Fetch189RetryOptions {
+  timeoutMs?: number
+  maxRetries?: number
+  retryDelayMs?: number
+}
+
+function waitForRetry(delayMs: number): Promise<void> {
+  if (delayMs <= 0) return Promise.resolve()
+  return new Promise((resolve) => setTimeout(resolve, delayMs))
+}
+
+/**
+ * Fetch an 189 endpoint with a bounded deadline and retries for transient
+ * upstream/network failures. The helper is also used by the raw download
+ * proxy because generated 189 URLs can return the same transient 5xx errors.
+ */
+export async function fetch189WithRetry(
+  input: string | URL,
+  init: RequestInit = {},
+  options: Fetch189RetryOptions = {},
+): Promise<Response> {
+  const timeoutMs = options.timeoutMs ?? CLOUD189_REQUEST_TIMEOUT_MS
+  const maxRetries = Math.max(0, options.maxRetries ?? CLOUD189_MAX_RETRIES)
+  const retryDelayMs = Math.max(0, options.retryDelayMs ?? 150)
+  let lastError: unknown
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const response = await fetch(input, {
+        ...init,
+        signal: controller.signal,
+      })
+      if (
+        !RETRYABLE_CLOUD189_STATUSES.has(response.status) ||
+        attempt === maxRetries
+      ) {
+        return response
+      }
+      await response.body?.cancel().catch(() => {})
+      await waitForRetry(retryDelayMs * (attempt + 1))
+    } catch (error) {
+      lastError = error
+      if (attempt === maxRetries) {
+        if ((error as any)?.name === "AbortError") {
+          throw new Error(`[189Cloud] 请求超时（${timeoutMs}ms）`, {
+            cause: error,
+          })
+        }
+        throw error
+      }
+      await waitForRetry(retryDelayMs * (attempt + 1))
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError))
+}
+
 export class Pan189Client {
   private addition: Cloud189Addition
   private cookie: string = ""
@@ -196,7 +262,7 @@ export class Pan189Client {
       if (redirectCount > 0) requestHeaders.Referer = currentUrl
       if (this.cookie) requestHeaders.Cookie = this.cookie
 
-      const response = await fetch(currentUrl, {
+      const response = await fetch189WithRetry(currentUrl, {
         method: "GET",
         headers: requestHeaders,
         redirect: "manual",
@@ -335,7 +401,7 @@ export class Pan189Client {
     }
 
     // 1. 获取 App 配置
-    const appConfRes = await fetch(
+    const appConfRes = await fetch189WithRetry(
       "https://open.e.189.cn/api/logbox/oauth2/appConf.do",
       {
         method: "POST",
@@ -355,7 +421,7 @@ export class Pan189Client {
     }
 
     // 2. 获取加密配置 (公钥 & 前缀)
-    const encConfRes = await fetch(
+    const encConfRes = await fetch189WithRetry(
       "https://open.e.189.cn/api/logbox/config/encryptConf.do",
       {
         method: "POST",
@@ -402,7 +468,7 @@ export class Pan189Client {
       paramId: appConf.data.paramId || "",
     }
 
-    const loginRes = await fetch(
+    const loginRes = await fetch189WithRetry(
       "https://open.e.189.cn/api/logbox/oauth2/loginSubmit.do",
       {
         method: "POST",
@@ -477,7 +543,7 @@ export class Pan189Client {
       reqBody = new URLSearchParams(options.body).toString()
     }
 
-    const res = await fetch(urlObj.toString(), {
+    const res = await fetch189WithRetry(urlObj.toString(), {
       method,
       headers,
       body: reqBody,
@@ -490,6 +556,11 @@ export class Pan189Client {
     try {
       data = parseJsonPreservingIds(text)
     } catch {
+      if (!res.ok) {
+        throw new Error(
+          `[189Cloud] HTTP 请求失败 (${res.status}): ${text.slice(0, 200)}`,
+        )
+      }
       throw new Error(`[189Cloud] 非预期响应: ${text.slice(0, 200)}`)
     }
 
@@ -668,7 +739,7 @@ export class Pan189Client {
 
     // 尝试解析一次 302 重定向获得直接 CDN 地址
     try {
-      const probeRes = await fetch(downloadUrl, {
+      const probeRes = await fetch189WithRetry(downloadUrl, {
         method: "GET",
         headers: this.getDownloadHeaders(),
         redirect: "manual",
@@ -746,7 +817,7 @@ export class Pan189Client {
     }
     if (this.cookie) headers.Cookie = this.cookie
 
-    const response = await fetch(
+    const response = await fetch189WithRetry(
       `https://upload.cloud.189.cn${uri}?params=${encryptedParams}`,
       { method: "GET", headers },
     )

@@ -7,7 +7,7 @@ import {
 } from "../../internal/driver/base"
 import { sortFileItems } from "../../internal/driver/sort"
 import { Cloud189Addition, FileItem189, FolderItem189 } from "./types"
-import { Pan189Client } from "./util"
+import { fetch189WithRetry, Pan189Client } from "./util"
 import { md5Hex } from "./crypto"
 
 const SUBREQUEST_LIMIT = 45
@@ -497,11 +497,17 @@ export class Cloud189Driver implements StorageDriver {
         requestHeaders[item.slice(0, separator)] = item.slice(separator + 1)
       }
     }
-    const response = await fetch(uploadData.requestURL, {
-      method: "PUT",
-      headers: requestHeaders,
-      body: content as unknown as BodyInit,
-    })
+    const response = await fetch189WithRetry(
+      uploadData.requestURL,
+      {
+        method: "PUT",
+        headers: requestHeaders,
+        body: content as unknown as BodyInit,
+      },
+      // A 10 MiB part may legitimately take longer than the short API
+      // deadline; keep retry handling but use a transfer-sized deadline.
+      { timeoutMs: 60_000 },
+    )
     if (!response.ok) {
       const body = await response.text().catch(() => "")
       throw new Error(

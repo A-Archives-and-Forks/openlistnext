@@ -3,6 +3,7 @@ import { resolvePath } from "../internal/model/db"
 import { parseRangeHeader } from "../internal/stream/stream"
 import { flushPendingDriverState, getDriver } from "../internal/op/storage"
 import { resolveShare } from "../internal/op/share"
+import { fetch189WithRetry } from "../drivers/189/util"
 
 let fsPromises: any = null
 let createReadStream: any = null
@@ -35,7 +36,7 @@ const getStorageRequestContext = (c: any) => {
 rawRouter.get("/*", async (c) => {
   await initNodeModules()
 
-  const isProxy =
+  const requestedProxy =
     c.req.query("proxy") === "true" ||
     c.req.path.startsWith("/p") ||
     c.req.path.startsWith("/api/p") ||
@@ -84,6 +85,13 @@ rawRouter.get("/*", async (c) => {
       const normDriver = (resolved.storage.driver || "")
         .toLowerCase()
         .replace(/[^a-z0-9]/g, "")
+      const isCloud189 =
+        normDriver === "189" ||
+        normDriver === "189cloud" ||
+        normDriver === "cloud189" ||
+        normDriver === "ctyun" ||
+        normDriver === "189pan"
+      const isProxy = requestedProxy || isCloud189
 
       // Remote cloud drivers: fetch download link via driver.get()
       if (normDriver !== "local") {
@@ -122,7 +130,12 @@ rawRouter.get("/*", async (c) => {
               const rangeReq = c.req.header("Range")
               if (rangeReq) headers["Range"] = rangeReq
 
-              let upstreamRes = await fetch(fileItem.raw_url, { headers })
+              const fetchDownload = (url: string, init: RequestInit) =>
+                isCloud189 ? fetch189WithRetry(url, init) : fetch(url, init)
+
+              let upstreamRes = await fetchDownload(fileItem.raw_url, {
+                headers,
+              })
 
               // If upstream returns 412 Precondition Failed (e.g. strict OSS check), retry with plain GET without Range
               if (upstreamRes.status === 412) {
@@ -130,7 +143,7 @@ rawRouter.get("/*", async (c) => {
                   `[rawRouter] Upstream returned 412 for '${reqPath}', retrying without Range header...`,
                 )
                 delete headers["Range"]
-                upstreamRes = await fetch(fileItem.raw_url, { headers })
+                upstreamRes = await fetchDownload(fileItem.raw_url, { headers })
               }
 
               // CORS headers
