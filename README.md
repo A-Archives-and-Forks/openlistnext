@@ -1,12 +1,27 @@
+> [!IMPORTANT]
+>
+> ### 📢 项目归档与官方合并公告 / Deprecation & Upstream Merge Notice
+>
+> **OpenListNext 现已正式与官方主线 [OpenListTeam/OpenList-Worker](https://github.com/OpenListTeam/OpenList-Worker) 归档合并！**
+>
+> 为凝聚生态合力，避免社区分化，本仓库现已正式转为只读存档（Read-Only Archive）。未来的新特性、漏洞修复、网盘驱动更新与社区维护将全面转移至官方仓库。
+>
+> - 🚀 **官方新版本仓库**：**[OpenListTeam/OpenList-Worker](https://github.com/OpenListTeam/OpenList-Worker)**
+> - 📖 **老用户平滑迁移手册**：**[docs/MIGRATION.md](docs/MIGRATION.md)**
+> - 📦 **完整技术资产与特性交接清单**：**[docs/HANDOFF_ASSETS.md](docs/HANDOFF_ASSETS.md)**
+> - 🤝 **致官方团队合并与共建提案函**：**[docs/UPSTREAM_PROPOSAL.md](docs/UPSTREAM_PROPOSAL.md)**
+>
+> _感谢所有社区用户与 10 位核心贡献者的辛勤付出！我们已作为官方团队的一员在新仓库继续为大家提供支持。_
+
 <div align="center">
 
 <img src="/logo.png" width="128" alt="OpenListNext Logo" />
 
 # OpenListNext
 
-**一个现代化的全栈文件列表 / 网盘管理系统**
+**一个现代化的全栈文件列表 / 网盘管理系统 (已并入 OpenList-Worker)**
 
-OpenListNext 是 [OpenList](https://github.com/OpenListTeam/OpenList) 的定制全栈分支，用轻量级 **Node.js (Hono + TypeScript)** 后端替代了原版 Go 后端，部署更轻量、启动更快、无需编译 Go 二进制。
+OpenListNext 是 [OpenList](https://github.com/OpenListTeam/OpenList) 的定制全栈分支，用轻量级 **Node.js (Hono + TypeScript)** 后端替代了原版 Go 后端，现已全量归档并入官方 **[OpenList-Worker](https://github.com/OpenListTeam/OpenList-Worker)**。
 
 <br/>
 
